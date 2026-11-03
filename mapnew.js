@@ -41,6 +41,143 @@ window.addEventListener("DOMContentLoaded", () => {
 
   let statesLoaded = false;
   let medianLoaded = false;
+  let educationLoaded = false;
+  let educationLoadFailed = false;
+  let taxMapLayer = null;
+  let educationMapLayer = null;
+  const mapLayerSelect = document.getElementById("mapLayerSelect");
+  const mapLayerHelp = document.getElementById("mapLayerHelp");
+  let selectedMapLayer = mapLayerSelect ? mapLayerSelect.value : "tax";
+
+  const updateMapLayer = function () {
+    const showTaxLayer = selectedMapLayer === "tax";
+    if (taxMapLayer) taxMapLayer.visible = showTaxLayer;
+    if (educationMapLayer) educationMapLayer.visible = !showTaxLayer;
+
+    const activeLayer = showTaxLayer ? taxMapLayer : educationMapLayer;
+    legend.layerInfos = activeLayer ? [{ layer: activeLayer }] : [];
+
+    if (mapLayerHelp) {
+      if (showTaxLayer) {
+        mapLayerHelp.textContent = taxMapLayer
+          ? "Tax results reflect the selected income, filing status, and dependents."
+          : "Submit income details to display state tax results.";
+      } else {
+        mapLayerHelp.textContent = educationMapLayer
+          ? "ACS 2010–2014 share of adults with a bachelor's degree or higher."
+          : educationLoadFailed
+            ? "Education data could not be loaded."
+            : "Loading education data…";
+      }
+    }
+  };
+
+  if (mapLayerSelect) {
+    mapLayerSelect.addEventListener("change", function () {
+      selectedMapLayer = mapLayerSelect.value;
+      updateMapLayer();
+    });
+  }
+
+  const maybeCreateEducationLayer = function () {
+    if (!educationLoaded || !statesLoaded || educationMapLayer) return;
+
+    const graphics = [];
+    Object.entries(stateObj).forEach(function ([key, value]) {
+      if (value.educationAttainment === null || value.educationAttainment === "") return;
+      const educationAttainment = Number(value.educationAttainment);
+      if (!value.geometry || !Number.isFinite(educationAttainment)) return;
+
+      graphics.push(new Graphic({
+        geometry: value.geometry,
+        attributes: {
+          ObjectId: graphics.length,
+          State_Abbr: value.abb,
+          State_Name: key.replace("_", " "),
+          EducationAttainment: educationAttainment
+        }
+      }));
+    });
+
+    if (!graphics.length) {
+      console.warn("No state education data with geometry is available for the map.");
+      return;
+    }
+
+    const educationRenderer = {
+      type: "class-breaks",
+      field: "EducationAttainment",
+      legendOptions: {
+        title: "Bachelor's Degree or Higher (%)"
+      },
+      defaultSymbol: {
+        type: "simple-fill",
+        color: "#d9d9d9",
+        style: "backward-diagonal",
+        outline: {
+          width: 0.5,
+          color: [80, 80, 80, 0.6]
+        }
+      },
+      defaultLabel: "No data",
+      classBreakInfos: [
+        {
+          minValue: 0,
+          maxValue: 20,
+          symbol: { type: "simple-fill", color: "#ffffcc", outline: { color: "#ffffff", width: 0.5 } },
+          label: "0–20%"
+        },
+        {
+          minValue: 20,
+          maxValue: 25,
+          symbol: { type: "simple-fill", color: "#c2e699", outline: { color: "#ffffff", width: 0.5 } },
+          label: "20–25%"
+        },
+        {
+          minValue: 25,
+          maxValue: 30,
+          symbol: { type: "simple-fill", color: "#78c679", outline: { color: "#ffffff", width: 0.5 } },
+          label: "25–30%"
+        },
+        {
+          minValue: 30,
+          maxValue: 35,
+          symbol: { type: "simple-fill", color: "#31a354", outline: { color: "#ffffff", width: 0.5 } },
+          label: "30–35%"
+        },
+        {
+          minValue: 35,
+          maxValue: 100,
+          symbol: { type: "simple-fill", color: "#006837", outline: { color: "#ffffff", width: 0.5 } },
+          label: "35% and higher"
+        }
+      ]
+    };
+
+    educationMapLayer = new FeatureLayer({
+      source: graphics,
+      objectIdField: "ObjectId",
+      geometryType: "polygon",
+      spatialReference: graphics[0].geometry.spatialReference,
+      title: "Bachelor's+ Education (%)",
+      fields: [
+        { name: "ObjectId", type: "oid" },
+        { name: "State_Abbr", type: "string" },
+        { name: "State_Name", type: "string" },
+        { name: "EducationAttainment", type: "double" }
+      ],
+      popupTemplate: {
+        title: "{State_Name}",
+        content: "Adults with a bachelor's degree or higher: {EducationAttainment}%"
+      },
+      renderer: educationRenderer,
+      visible: selectedMapLayer === "education"
+    });
+    map.add(educationMapLayer);
+    updateMapLayer();
+  };
+
+  updateMapLayer();
 
   // disable submit until required data is loaded
   const submitBtn = document.querySelector('form button[type="submit"]');
@@ -97,6 +234,7 @@ window.addEventListener("DOMContentLoaded", () => {
         })
         console.log('loadStates: geometry loaded for states');
         statesLoaded = true;
+        maybeCreateEducationLayer();
         //!!if you have a new dataset, you also need to check if all are loaded before enabling submit in the following if statement.
         if (statesLoaded && medianLoaded) {
           if (submitBtn) submitBtn.disabled = false;
@@ -231,9 +369,13 @@ window.addEventListener("DOMContentLoaded", () => {
             }
           });
         });
+        educationLoaded = true;
+        maybeCreateEducationLayer();
         console.log('loadEducationData: education attainment loaded');
       })
       .catch(function (err) {
+        educationLoadFailed = true;
+        updateMapLayer();
         console.error('loadEducationData failed:', err);
       });
   };
@@ -386,19 +528,6 @@ window.addEventListener("DOMContentLoaded", () => {
       })
       console.log(stateObj)
     }
-    // remove the original statesLayer if present, but don't remove the basemap or all layers
-    try {
-      if (map.layers && map.layers.length) {
-        // remove the original feature layer preview if it exists
-        map.layers.forEach(function (lyr) {
-          if (lyr && (lyr.title === 'US States' || lyr.title === 'State Tax Layer')) {
-            map.layers.remove(lyr);
-          }
-        });
-      }
-    } catch (err) {
-      console.warn('Error removing previous layer:', err);
-    }
     const noTax = {
       type: "simple-fill", // autocasts as new SimpleFillSymbol()
       color: "#0c7d3f",
@@ -487,7 +616,8 @@ window.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const layer = new FeatureLayer({
+    if (taxMapLayer) map.remove(taxMapLayer);
+    taxMapLayer = new FeatureLayer({
       source: graphics,  // array of graphics objects
       objectIdField: "ObjectId",
       title: "State Tax Layer",
@@ -525,6 +655,7 @@ window.addEventListener("DOMContentLoaded", () => {
     });
 
     console.log('Adding State Tax Layer to map with', graphics.length, 'graphics');
-    map.add(layer);
+    map.add(taxMapLayer);
+    updateMapLayer();
   });
 });
