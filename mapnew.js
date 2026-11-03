@@ -42,42 +42,7 @@ window.addEventListener("DOMContentLoaded", () => {
   let statesLoaded = false;
   let medianLoaded = false;
   let educationLoaded = false;
-  let educationLoadFailed = false;
-  let taxMapLayer = null;
   let educationMapLayer = null;
-  const mapLayerSelect = document.getElementById("mapLayerSelect");
-  const mapLayerHelp = document.getElementById("mapLayerHelp");
-  let selectedMapLayer = mapLayerSelect ? mapLayerSelect.value : "tax";
-
-  const updateMapLayer = function () {
-    const showTaxLayer = selectedMapLayer === "tax";
-    if (taxMapLayer) taxMapLayer.visible = showTaxLayer;
-    if (educationMapLayer) educationMapLayer.visible = !showTaxLayer;
-
-    const activeLayer = showTaxLayer ? taxMapLayer : educationMapLayer;
-    legend.layerInfos = activeLayer ? [{ layer: activeLayer }] : [];
-
-    if (mapLayerHelp) {
-      if (showTaxLayer) {
-        mapLayerHelp.textContent = taxMapLayer
-          ? "Tax results reflect the selected income, filing status, and dependents."
-          : "Submit income details to display state tax results.";
-      } else {
-        mapLayerHelp.textContent = educationMapLayer
-          ? "ACS 2010–2014 share of adults with a bachelor's degree or higher."
-          : educationLoadFailed
-            ? "Education data could not be loaded."
-            : "Loading education data…";
-      }
-    }
-  };
-
-  if (mapLayerSelect) {
-    mapLayerSelect.addEventListener("change", function () {
-      selectedMapLayer = mapLayerSelect.value;
-      updateMapLayer();
-    });
-  }
 
   const maybeCreateEducationLayer = function () {
     if (!educationLoaded || !statesLoaded || educationMapLayer) return;
@@ -171,13 +136,10 @@ window.addEventListener("DOMContentLoaded", () => {
         content: "Adults with a bachelor's degree or higher: {EducationAttainment}%"
       },
       renderer: educationRenderer,
-      visible: selectedMapLayer === "education"
+      visible: true
     });
     map.add(educationMapLayer);
-    updateMapLayer();
   };
-
-  updateMapLayer();
 
   // disable submit until required data is loaded
   const submitBtn = document.querySelector('form button[type="submit"]');
@@ -374,8 +336,6 @@ window.addEventListener("DOMContentLoaded", () => {
         console.log('loadEducationData: education attainment loaded');
       })
       .catch(function (err) {
-        educationLoadFailed = true;
-        updateMapLayer();
         console.error('loadEducationData failed:', err);
       });
   };
@@ -412,7 +372,6 @@ window.addEventListener("DOMContentLoaded", () => {
     var married = formElement.querySelector('input[name="marriedRadios"]:checked').value === 'married';
     var dependents = Number($('#dependents').val()) || 0;
     console.log('Filing status:', married ? 'Married' : 'Single', 'dependents:', dependents, 'income:', income);
-    var graphics = []
     if (income > 100000000) {
       alert("Sorry, you make too much money for this tool to be useful")
     }
@@ -432,22 +391,6 @@ window.addEventListener("DOMContentLoaded", () => {
                 educationAttainment: value.educationAttainment || "N/A"
               }
             })
-            if (value.geometry) {
-              let gfx = new Graphic({
-                geometry: value.geometry,
-                attributes: {
-                  "Income_Before_Taxes": income.toString(),
-                  "Income_After_Taxes": income.toString(),
-                  "Total_State_Tax_Owed": 0,
-                  "State_Abbr": value.abb,
-                  "PercentOwed": 0,
-                  "ObjectId": index
-                }
-              });
-              graphics.push(gfx)
-            } else {
-              console.warn('No geometry for state (noTax), skipping graphic:', key);
-            }
           }
           else {
             // declare locals to avoid leaking to outer scope
@@ -502,22 +445,6 @@ window.addEventListener("DOMContentLoaded", () => {
             value['grossDifference'] = Math.trunc(totalTax)
             value['percentDifference'] = percent
             value['bracket'] = (bracket !== undefined && bracket !== null) ? bracket.toString().replace("[", "").replace("]", "") : "0"
-            if (value.geometry) {
-              let gfx = new Graphic({
-                geometry: value.geometry,
-                attributes: {
-                  "Income_Before_Taxes": value['incomeBeforeTaxes'],
-                  "Income_After_Taxes": value['incomeAfterTaxes'],
-                  "Total_State_Tax_Owed": value['grossDifference'],
-                  "State_Abbr": value.abb,
-                  "PercentOwed": Number(value['percentDifference']) || 0,
-                  "ObjectId": index
-                }
-              });
-              graphics.push(gfx)
-            } else {
-              console.warn('No geometry for state, skipping graphic:', key);
-            }
 
             $("th[data-field='percentDifference'] .sortable").click();
           }
@@ -528,134 +455,5 @@ window.addEventListener("DOMContentLoaded", () => {
       })
       console.log(stateObj)
     }
-    const noTax = {
-      type: "simple-fill", // autocasts as new SimpleFillSymbol()
-      color: "#0c7d3f",
-      style: "solid",
-      outline: {
-        width: 0.2,
-        color: [255, 255, 255, 0.5]
-      }
-    };
-
-    const under3 = {
-      type: "simple-fill", // autocasts as new SimpleFillSymbol()
-      color: "#99bf47",
-      style: "solid",
-      outline: {
-        width: 0.2,
-        color: [255, 255, 255, 0.5]
-      }
-    };
-
-    const threeToFive = {
-      type: "simple-fill", // autocasts as new SimpleFillSymbol()
-      color: "#d6a206",
-      style: "solid",
-      outline: {
-        width: 0.2,
-        color: [255, 255, 255, 0.5]
-      }
-    };
-
-    const over5 = {
-      type: "simple-fill", // autocasts as new SimpleFillSymbol()
-      color: "#c42f02",
-      style: "solid",
-      outline: {
-        width: 0.2,
-        color: [255, 255, 255, 0.5]
-      }
-    };
-    const renderer = {
-      type: "class-breaks", // autocasts as new ClassBreaksRenderer()
-      field: "PercentOwed",
-      legendOptions: {
-        title: "Total Actual State Tax Owed"
-      },
-      defaultSymbol: {
-        type: "simple-fill", // autocasts as new SimpleFillSymbol()
-        color: "black",
-        style: "backward-diagonal",
-        outline: {
-          width: 0.5,
-          color: [50, 50, 50, 0.6]
-        }
-      },
-      defaultLabel: "no data",
-      classBreakInfos: [
-        {
-          minValue: 0,
-          maxValue: 0,
-          symbol: noTax,
-          label: "No tax"
-        },
-        {
-          minValue: 0.01,
-          maxValue: 3,
-          symbol: under3,
-          label: "0 - 3%"
-        },
-        {
-          minValue: 3,
-          maxValue: 5,
-          symbol: threeToFive,
-          label: "3 - 5%"
-        },
-        {
-          minValue: 5.01,
-          maxValue: 100,
-          symbol: over5,
-          label: "more than 5%"
-        }
-      ]
-    };
-    console.log('Graphics prepared, count =', graphics ? graphics.length : 0);
-    if (!graphics || graphics.length === 0) {
-      console.warn('No graphics to display as a layer — choropleth will not be added.');
-      return;
-    }
-
-    if (taxMapLayer) map.remove(taxMapLayer);
-    taxMapLayer = new FeatureLayer({
-      source: graphics,  // array of graphics objects
-      objectIdField: "ObjectId",
-      title: "State Tax Layer",
-      fields: [{
-        name: "ObjectId",
-        type: "oid"
-      }, {
-        name: "Income_Before_Taxes",
-        type: "double"
-      },
-      {
-        name: "Income_After_Taxes",
-        type: "double"
-      }, {
-        name: "Total_State_Tax_Owed",
-        type: "double"
-      },
-      {
-        name: "PercentOwed",
-        type: "double"
-      },
-      {
-        name: "State_Abbr",
-        type: "string"
-      },
-      ],
-      popupTemplate: {
-        content: "State: {State_Abbr} <br>" +
-          "State tax as percent of income: %{PercentOwed} <br>" +
-          "Total State Tax Owed: {Total_State_Tax_Owed} <br>" +
-          "Income after states taxes: {Income_After_Taxes}"
-      },
-      renderer: renderer
-
-    });
-
-    console.log('Adding State Tax Layer to map with', graphics.length, 'graphics');
-    map.add(taxMapLayer);
-    updateMapLayer();
   });
 });
